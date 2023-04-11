@@ -1,0 +1,117 @@
+#!/bin/sh
+
+# exit script on error
+set -e
+
+# assign usage
+usage=$(
+	cat <<EOUSAGE
+Ini Curd v0.0.1
+
+Usage:
+	$0 [-hiv] <ini_file> <section> <key> <value>
+
+Create value of key in [section] find in ini file
+
+	-h	Print usage and exit.
+	-i	Modify ini file inplace.
+	-v	Print message on successfully update.
+		(Only work if modify inplace.)
+EOUSAGE
+)
+
+# parse command-line arguments
+inplace=false
+verbose=false
+while getopts ":hiv" opt; do
+	case ${opt} in
+	h)
+		echo "$usage"
+		exit 0
+		;;
+	v) verbose=true ;;
+	i) inplace=true ;;
+	\?)
+		echo "$usage" >&2
+		exit 1
+		;;
+	esac
+done
+shift $((OPTIND - 1))
+
+# check argument count
+if [ $# -lt 1 ]; then
+	echo "Error: <ini_file> is needed!" >&2
+	echo "$usage" >&2
+	exit 1
+fi
+
+# check file exist
+ini_file="$1"
+if [ ! -f "$ini_file" ]; then
+	echo "Error: $ini_file not found" >&2
+	exit 1
+fi
+
+# check argument count
+if [ $# -lt 3 ]; then
+	echo "Error: <section> <key> is needed!" >&2
+	echo "$usage" >&2
+	exit 1
+fi
+section="$2"
+key="$3"
+
+# check section exists in ini
+grep_expr_check_section='^\['$section']'
+section_exists=true
+if ! grep -q "$grep_expr_check_section" "$ini_file"; then
+	section_exists=false
+fi
+
+# check key exists in section of ini
+
+# script explain:
+#     1. sed delete all lines from ini_file except line with matched key
+#     2. grep check pattern ^[[:space:]]*$key[[:space:]]*= exist from pipe
+
+sed_script_get_section_only_content='/^\['$section'\]$/,/^\[/!d;'
+grep_expr_check_key='^[[:space:]]*'$key'[[:space:]]*='
+
+if sed "$sed_script_get_section_only_content" "$ini_file" | grep -q $grep_expr_check_key; then
+	echo "Error: $key already exists in section [$section] of $ini_file" >&2
+	exit 1
+fi
+
+shift 3
+value=$(echo "$@" | sed 's/\//\\\//g' | sed 's/\\/\\\\/g')
+
+# create value
+
+# sed explain:
+#   1. get section only content (same as last sed movement)
+#   2.
+sed_script_create_value='/^\['$section'\]$/a'$key' = '$value''
+sed_script_create_section='1i['$section']'
+
+if $inplace; then
+	if $section_exists; then
+		sed -i "$sed_script_create_value" "$ini_file"
+		if [ $? -eq 0 ] && $verbose; then
+			echo "Success: create [$section]:$key = $value"
+		fi
+	else
+		sed -i "$sed_script_create_section" "$ini_file" &&
+			sed -i "$sed_script_create_value" "$ini_file"
+		if [ $? -eq 0 ] && $verbose; then
+			echo "Success: create [$section]:$key = $value"
+		fi
+	fi
+else
+	if $section_exists; then
+		sed "$sed_script_create_value" "$ini_file"
+	else
+		ini=$(cat "$ini_file")
+		printf "[$section]\n%s\n" "$ini" | sed "$sed_script_create_value"
+	fi
+fi
